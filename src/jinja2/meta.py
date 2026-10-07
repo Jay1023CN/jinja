@@ -43,6 +43,10 @@ def find_undeclared_variables(ast: nodes.Template) -> set[str]:
     >>> meta.find_undeclared_variables(ast) == {'bar'}
     True
 
+    .. versionchanged:: 3.2.0
+       Variables assigned in every branch of an ``if`` statement are not
+       returned unless they are read before assignment.
+
     .. admonition:: Implementation
 
        Internally the code generator is used for finding undeclared variables.

@@ -135,6 +135,16 @@ class Symbols:
             target = self.find_ref(name)
             assert target is not None, "should not happen"
 
+            if all(name in sym.stores for sym in branch_symbols):
+                # Every path assigns the name. Only resolve it from the
+                # context if a branch reads it before assigning it.
+                if any(
+                    sym.loads.get(target) == (VAR_LOAD_RESOLVE, name)
+                    for sym in branch_symbols
+                ):
+                    self.loads[target] = (VAR_LOAD_RESOLVE, name)
+                continue
+
             if self.parent is not None:
                 outer_target = self.parent.find_ref(name)
                 if outer_target is not None:
@@ -249,6 +259,8 @@ class FrameSymbolVisitor(NodeVisitor):
 
     def visit_If(self, node: nodes.If, **kwargs: t.Any) -> None:
         self.visit(node.test, **kwargs)
+        for elif_node in node.elif_:
+            self.visit(elif_node.test, **kwargs)
         original_symbols = self.symbols
 
         def inner_visit(nodes: t.Iterable[nodes.Node]) -> "Symbols":
@@ -260,10 +272,10 @@ class FrameSymbolVisitor(NodeVisitor):
             self.symbols = original_symbols
             return rv
 
-        body_symbols = inner_visit(node.body)
-        elif_symbols = inner_visit(node.elif_)
-        else_symbols = inner_visit(node.else_ or ())
-        self.symbols.branch_update([body_symbols, elif_symbols, else_symbols])
+        branch_symbols = [inner_visit(node.body)]
+        branch_symbols.extend(inner_visit(elif_node.body) for elif_node in node.elif_)
+        branch_symbols.append(inner_visit(node.else_ or ()))
+        self.symbols.branch_update(branch_symbols)
 
     def visit_Macro(self, node: nodes.Macro, **kwargs: t.Any) -> None:
         self.symbols.store(node.name)

@@ -161,6 +161,109 @@ class TestExtendedAPI:
 
 
 class TestMeta:
+    @pytest.mark.parametrize("elif_count", [0, 1, 2])
+    @pytest.mark.parametrize("enable_async", [False, True])
+    def test_find_undeclared_variables_all_branches_assign(
+        self, env, elif_count, enable_async
+    ):
+        env = env.overlay(enable_async=enable_async)
+        source = "{% if control == 0 %}{% set output = 0 %}"
+        for i in range(1, elif_count + 1):
+            source += f"{{% elif control == {i} %}}{{% set output = {i} %}}"
+        source += "{% else %}{% set output = 3 %}{% endif %}{{ output }}"
+        assert meta.find_undeclared_variables(env.parse(source)) == {"control"}
+        template = env.from_string(source)
+        for i in range(elif_count + 1):
+            assert template.render(control=i) == str(i)
+        assert template.render(control=-1) == "3"
+
+    @pytest.mark.parametrize(
+        ("source", "expected"),
+        [
+            (
+                "{% if control %}{% set output = 1 %}{% endif %}{{ output }}",
+                {"control", "output"},
+            ),
+            (
+                "{% if control %}{% set output = 1 %}{% else %}"
+                "{% set other = 2 %}{% endif %}{{ output }}",
+                {"control", "other", "output"},
+            ),
+            (
+                "{% if control %}{{ output }}{% set output = 1 %}{% else %}"
+                "{% set output = 2 %}{% endif %}{{ output }}",
+                {"control", "output"},
+            ),
+            (
+                "{% if control %}{% set output = 1 %}{% else %}"
+                "{{ output }}{% set output = 2 %}{% endif %}{{ output }}",
+                {"control", "output"},
+            ),
+            (
+                "{% if control %}{% set output = 1 %}{% elif output %}"
+                "{% set output = 2 %}{% else %}{% set output = 3 %}"
+                "{% endif %}{{ output }}",
+                {"control", "output"},
+            ),
+            (
+                "{% if control %}{% if nested %}{% set output = 1 %}"
+                "{% else %}{% set output = 2 %}{% endif %}{% else %}"
+                "{% set output = 3 %}{% endif %}{{ output }}",
+                {"control", "nested"},
+            ),
+            (
+                "{% if control %}{% if nested %}{% set output = 1 %}{% endif %}"
+                "{% else %}{% set output = 2 %}{% endif %}{{ output }}",
+                {"control", "nested", "output"},
+            ),
+            (
+                "{% set output = 0 %}{% if control %}{% set output = 1 %}"
+                "{% endif %}{{ output }}",
+                {"control"},
+            ),
+            (
+                "{% for item in seq %}{% if control %}{% set output = 1 %}"
+                "{% else %}{% set output = 2 %}{% endif %}{{ output }}"
+                "{% endfor %}{{ output }}",
+                {"seq", "control", "output"},
+            ),
+        ],
+    )
+    def test_find_undeclared_variables_branch_dependencies(self, env, source, expected):
+        assert meta.find_undeclared_variables(env.parse(source)) == expected
+
+    @pytest.mark.parametrize(
+        ("source", "expected"),
+        [
+            (
+                "{% if control %}{{ output }}{% set output = 1 %}{% else %}"
+                "{% set output = 2 %}{% endif %}{{ output }}",
+                ["71", "2"],
+            ),
+            (
+                "{% if control %}{% set output = 1 %}{% else %}"
+                "{{ output }}{% set output = 2 %}{% endif %}{{ output }}",
+                ["1", "72"],
+            ),
+            (
+                "{% if control %}{% set output = 1 %}{% endif %}{{ output }}",
+                ["1", "7"],
+            ),
+            (
+                "{% set output = 9 %}{% for item in seq %}"
+                "{% if control %}{% set output = 1 %}{% else %}"
+                "{% set output = 2 %}{% endif %}{{ output }}"
+                "{% endfor %}{{ output }}",
+                ["19", "29"],
+            ),
+        ],
+    )
+    def test_branch_assignment_render(self, env, source, expected):
+        template = env.from_string(source)
+        assert [
+            template.render(control=value, output=7, seq=[1]) for value in (True, False)
+        ] == expected
+
     def test_find_undeclared_variables(self, env):
         ast = env.parse("{% set foo = 42 %}{{ bar + foo }}")
         x = meta.find_undeclared_variables(ast)
